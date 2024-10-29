@@ -37,17 +37,65 @@ class MediaSorter:
         mime_type, _ = mimetypes.guess_type(str(file_path))
         return mime_type and mime_type.startswith(('video/', 'audio/', 'image/'))
 
+    def unzip_directory(self) -> None:
+        """First pass: Unzip all zip files in the directory."""
+        self.console.print("[yellow]Starting unzip phase...[/yellow]")
+        
+        zip_files = list(self.source_dir.rglob('*.zip')) + list(self.source_dir.rglob('*.ZIP'))
+        
+        if not zip_files:
+            self.console.print("[green]No zip files found.[/green]")
+            return
+
+        with Progress(
+            SpinnerColumn(),
+            *Progress.get_default_columns(),
+            TimeElapsedColumn(),
+        ) as progress:
+            unzip_task = progress.add_task("[cyan]Unzipping files...", total=len(zip_files))
+            
+            for zip_path in zip_files:
+                try:
+                    rel_path = zip_path.relative_to(self.source_dir)
+                    extract_dir = zip_path.parent / zip_path.stem
+                    
+                    self.console.print(f"[yellow]Unzipping: {zip_path}[/yellow]")
+                    
+                    # Extract the zip file
+                    with zipfile.ZipFile(zip_path, 'r') as zip_ref:
+                        zip_ref.extractall(extract_dir)
+                    
+                    # Delete the original zip file after successful extraction
+                    zip_path.unlink()
+                    
+                    self.operations_log.append({
+                        'timestamp': datetime.now().isoformat(),
+                        'action': 'unzip',
+                        'source': str(zip_path),
+                        'destination': str(extract_dir),
+                        'status': 'success'
+                    })
+                    
+                except Exception as e:
+                    self.console.print(f"[red]Error unzipping {zip_path}: {e}[/red]")
+                    self.operations_log.append({
+                        'timestamp': datetime.now().isoformat(),
+                        'action': 'unzip_error',
+                        'source': str(zip_path),
+                        'error': str(e)
+                    })
+                
+                progress.update(unzip_task, advance=1)
+
+        self.console.print("[green]Unzip phase complete![/green]")
+
     def calculate_total_size(self, path: Path) -> int:
         """Calculate total size of non-media files."""
         total = 0
         self.console.print("[yellow]Calculating total size...[/yellow]")
         for item in path.rglob('*'):
-            if item.is_file():
-                if item.suffix in self.zip_extensions:
-                    self.console.print(f"Found zip: {item}")
-                    total += item.stat().st_size * 2  # Account for extracted contents
-                elif not self.is_media_file(item):
-                    total += item.stat().st_size
+            if item.is_file() and not self.is_media_file(item):
+                total += item.stat().st_size
         self.console.print(f"[green]Total size to process: {total / 1024 / 1024:.2f} MB[/green]")
         return total
 
@@ -64,75 +112,17 @@ class MediaSorter:
                 })
         return planned_operations
 
-    def process_zip_file(self, zip_path: Path, relative_path: Path) -> List[Dict]:
-        """Process a zip file and any nested zip files within it."""
-        operations = []
-        
-        # Add debug output
-        self.console.print(f"[yellow]Processing zip: {zip_path}[/yellow]")
-        
-        with tempfile.TemporaryDirectory() as temp_dir:
-            temp_path = Path(temp_dir)
-            
-            # Extract zip file
-            try:
-                with zipfile.ZipFile(zip_path, 'r') as zip_ref:
-                    # Show zip contents before extraction
-                    self.console.print(f"[blue]Zip contains {len(zip_ref.namelist())} files[/blue]")
-                    zip_ref.extractall(temp_path)
-            except Exception as e:
-                self.console.print(f"[red]Error extracting {zip_path}: {e}[/red]")
-                return operations
-            
-            # Process extracted files
-            for item in temp_path.rglob('*'):
-                if item.is_file():
-                    self.console.print(f"[cyan]Processing extracted file: {item.name}[/cyan]")
-                    if item.suffix in self.zip_extensions:
-                        # Found a nested zip file
-                        self.console.print(f"[yellow]Found nested zip: {item.name}[/yellow]")
-                        nested_rel_path = item.relative_to(temp_path)
-                        nested_ops = self.process_zip_file(
-                            item, 
-                            relative_path.parent / 'unzipped' / zip_path.stem / nested_rel_path
-                        )
-                        operations.extend(nested_ops)
-                    elif not self.is_media_file(item):
-                        # Handle non-media files
-                        rel_path = item.relative_to(temp_path)
-                        new_path = self.backup_dir / relative_path.parent / 'unzipped' / zip_path.stem / rel_path
-                        
-                        # Create parent directories
-                        new_path.parent.mkdir(parents=True, exist_ok=True)
-                        
-                        # Copy file
-                        try:
-                            shutil.copy2(item, new_path)
-                            operations.append({
-                                'timestamp': datetime.now().isoformat(),
-                                'action': 'extract_and_copy',
-                                'source': f"{zip_path}::{rel_path}",
-                                'destination': str(new_path),
-                                'status': 'success'
-                            })
-                        except Exception as e:
-                            self.console.print(f"[red]Error copying {item}: {e}[/red]")
-                            operations.append({
-                                'timestamp': datetime.now().isoformat(),
-                                'action': 'error',
-                                'source': f"{zip_path}::{rel_path}",
-                                'error': str(e)
-                            })
-        
-        return operations
-
     def process_directory(self, dry_run: bool = False) -> None:
+        """Main processing function."""
         try:
-            """Main processing function."""
             # Create backup directory if it doesn't exist
             self.backup_dir.mkdir(parents=True, exist_ok=True)
 
-            # First, do a dry run and show planned operations
+            # First, handle all zip files
+            if not dry_run:
+                self.unzip_directory()
+
+            # Then do a dry run and show planned operations
             planned_ops = self.dry_run()
             
             if dry_run:
@@ -159,75 +149,37 @@ class MediaSorter:
                 task = progress.add_task("[cyan]Processing...", total=total_size)
 
                 for item in self.source_dir.rglob('*'):
-                    if item.is_file():
-                        rel_path = item.relative_to(self.source_dir)
-                        
-                        # Check if it's a zip file
-                        if item.suffix in self.zip_extensions:
-                            try:
-                                # Process zip file contents
-                                zip_ops = self.process_zip_file(item, rel_path)
-                                self.operations_log.extend(zip_ops)
-                                
-                                # Update progress
-                                file_size = item.stat().st_size
-                                processed_size += file_size
-                                progress.update(task, completed=processed_size)
-                                
-                                # Delete original zip after processing
-                                item.unlink()
-                                
-                                # Log the operation
-                                self.operations_log.append({
-                                    'timestamp': datetime.now().isoformat(),
-                                    'action': 'process_zip',
-                                    'source': str(item),
-                                    'status': 'success'
-                                })
-                                
-                            except Exception as e:
-                                self.operations_log.append({
-                                    'timestamp': datetime.now().isoformat(),
-                                    'action': 'error_zip',
-                                    'source': str(item),
-                                    'error': str(e)
-                                })
-                                self.console.print(f"[red]Error processing zip file {item}: {e}[/red]")
-                                
-                        elif not self.is_media_file(item):
-                            try:
-                                # Handle non-media files
-                                dest_path = self.backup_dir / rel_path
-                                dest_path.parent.mkdir(parents=True, exist_ok=True)
-                                
-                                # Copy the file
-                                shutil.copy2(item, dest_path)
-                                
-                                # Update progress
-                                file_size = item.stat().st_size
-                                processed_size += file_size
-                                progress.update(task, completed=processed_size)
-                                
-                                # Log the operation
-                                self.operations_log.append({
-                                    'timestamp': datetime.now().isoformat(),
-                                    'action': 'move',
-                                    'source': str(item),
-                                    'destination': str(dest_path),
-                                    'status': 'success'
-                                })
-                                
-                                # Delete original file after successful copy
-                                item.unlink()
-                                
-                            except Exception as e:
-                                self.operations_log.append({
-                                    'timestamp': datetime.now().isoformat(),
-                                    'action': 'error',
-                                    'source': str(item),
-                                    'error': str(e)
-                                })
-                                self.console.print(f"[red]Error processing file {item}: {e}[/red]")
+                    if item.is_file() and not self.is_media_file(item):
+                        try:
+                            rel_path = item.relative_to(self.source_dir)
+                            dest_path = self.backup_dir / rel_path
+                            dest_path.parent.mkdir(parents=True, exist_ok=True)
+                            
+                            # Move the file instead of copy+delete
+                            shutil.move(str(item), str(dest_path))
+                            
+                            # Update progress
+                            file_size = item.stat().st_size
+                            processed_size += file_size
+                            progress.update(task, completed=processed_size)
+                            
+                            # Log the operation
+                            self.operations_log.append({
+                                'timestamp': datetime.now().isoformat(),
+                                'action': 'move',
+                                'source': str(item),
+                                'destination': str(dest_path),
+                                'status': 'success'
+                            })
+                            
+                        except Exception as e:
+                            self.operations_log.append({
+                                'timestamp': datetime.now().isoformat(),
+                                'action': 'error',
+                                'source': str(item),
+                                'error': str(e)
+                            })
+                            self.console.print(f"[red]Error processing file {item}: {e}[/red]")
 
             # Save operations log
             log_file = self.backup_dir / 'operations_log.json'
@@ -244,20 +196,24 @@ class MediaSorter:
             with open(log_file, 'w') as f:
                 json.dump(self.operations_log, f, indent=2)
             self.console.print("[yellow]Partial operations log saved.[/yellow]")
-            # Force exit
-            import sys
-            sys.exit(1)
+            # Exit the entire Python process
+            os._exit(1)  # Using os._exit() instead of sys.exit()
 
 if __name__ == "__main__":
-    # Example usage
-    source_directory = "/Volumes/Extreme SSD"
-    backup_directory = "/Volumes/Extreme SSD/NonMedia"
+    try:
+        # Example usage
+        source_directory = "/Volumes/Extreme SSD"
+        backup_directory = "/Volumes/Extreme SSD/NonMedia"
+        
+        sorter = MediaSorter(source_directory, backup_directory)
+        
+        # Run dry-run first
+        sorter.process_directory(dry_run=True)
+        
+        # If everything looks good, run the actual process
+        if input("\nRun actual process? (y/n): ").lower().startswith('y'):
+            sorter.process_directory(dry_run=False)
     
-    sorter = MediaSorter(source_directory, backup_directory)
-    
-    # Run dry-run first
-    sorter.process_directory(dry_run=True)
-    
-    # If everything looks good, run the actual process
-    if input("\nRun actual process? (y/n): ").lower().startswith('y'):
-        sorter.process_directory(dry_run=False)
+    except KeyboardInterrupt:
+        print("\nScript terminated by user")
+        os._exit(1)
