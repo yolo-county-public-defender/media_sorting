@@ -38,7 +38,7 @@ class MediaSorter:
         return mime_type and mime_type.startswith(('video/', 'audio/', 'image/'))
 
     def unzip_directory(self) -> None:
-        """First pass: Unzip all zip files in the directory."""
+        """First pass: Unzip all zip files in their original location."""
         self.console.print("[yellow]Starting unzip phase...[/yellow]")
         
         zip_files = list(self.source_dir.rglob('*.zip')) + list(self.source_dir.rglob('*.ZIP'))
@@ -56,19 +56,16 @@ class MediaSorter:
             
             for zip_path in zip_files:
                 try:
-                    # Create extraction directory preserving the original path structure
-                    # but relative to the backup directory
-                    rel_path = zip_path.relative_to(self.source_dir)
-                    extract_dir = self.backup_dir / rel_path.parent / zip_path.stem
+                    # Extract in the same directory as the zip file
+                    extract_dir = zip_path.parent / zip_path.stem
                     
                     self.console.print(f"[yellow]Unzipping: {zip_path} to {extract_dir}[/yellow]")
                     
-                    # Create parent directory
-                    extract_dir.parent.mkdir(parents=True, exist_ok=True)
+                    # Create extraction directory
+                    extract_dir.mkdir(parents=True, exist_ok=True)
                     
-                    # Extract the zip file
+                    # Extract the zip file in place
                     with zipfile.ZipFile(zip_path, 'r') as zip_ref:
-                        # Extract all contents while preserving structure
                         zip_ref.extractall(extract_dir)
                     
                     # Delete the original zip file after successful extraction
