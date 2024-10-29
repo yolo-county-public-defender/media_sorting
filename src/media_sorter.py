@@ -1,3 +1,4 @@
+# Standard library imports
 import os
 import shutil
 import mimetypes
@@ -6,47 +7,76 @@ import tempfile
 from pathlib import Path
 from typing import Set, Dict, List
 from datetime import datetime
+
+# Third-party imports for console UI
 from rich.console import Console
 from rich.progress import Progress, SpinnerColumn, TimeElapsedColumn
 import json
 
 class MediaSorter:
+    """
+    A class to sort and organize files by separating media and non-media content.
+    Handles unzipping of archives and moving non-media files to a backup location.
+    """
+    
     def __init__(self, source_dir: str, backup_dir: str):
+        """
+        Initialize the MediaSorter with source and backup directories.
+        
+        Args:
+            source_dir (str): Path to the source directory containing files to sort
+            backup_dir (str): Path where non-media files will be moved
+        """
         self.source_dir = Path(source_dir)
         self.backup_dir = Path(backup_dir)
-        self.console = Console()
-        self.operations_log: List[Dict] = []
+        self.console = Console()  # Rich console for prettier output
+        self.operations_log: List[Dict] = []  # Track all operations performed
         
-        # Define media file extensions
+        # Define known media file extensions for quick lookup
         self.media_extensions: Set[str] = {
-            # Video
+            # Video formats
             '.mp4', '.avi', '.mov', '.mkv', '.wmv', '.flv',
-            # Audio
+            # Audio formats
             '.mp3', '.wav', '.flac', '.m4a', '.aac',
-            # Images
+            # Image formats
             '.jpg', '.jpeg', '.png', '.gif', '.bmp', '.tiff'
         }
 
-        # Add zip to non-media types we want to process specially
+        # Zip files need special handling (extraction before processing)
         self.zip_extensions = {'.zip', '.ZIP'}
 
     def is_media_file(self, file_path: Path) -> bool:
-        """Check if file is a media file based on extension and mime type."""
+        """
+        Determine if a file is a media file based on extension and MIME type.
+        
+        Args:
+            file_path (Path): Path to the file to check
+            
+        Returns:
+            bool: True if file is a media file, False otherwise
+        """
+        # First check extension for quick determination
         if file_path.suffix.lower() in self.media_extensions:
             return True
+        # If extension check fails, try MIME type for deeper inspection
         mime_type, _ = mimetypes.guess_type(str(file_path))
         return mime_type and mime_type.startswith(('video/', 'audio/', 'image/'))
 
     def unzip_directory(self) -> None:
-        """First pass: Unzip all zip files in their original location."""
+        """
+        First processing phase: Extract all zip files in their original locations.
+        Deletes original zip files after successful extraction.
+        """
         self.console.print("[yellow]Starting unzip phase...[/yellow]")
         
+        # Find all zip files recursively in source directory
         zip_files = list(self.source_dir.rglob('*.zip')) + list(self.source_dir.rglob('*.ZIP'))
         
         if not zip_files:
             self.console.print("[green]No zip files found.[/green]")
             return
 
+        # Setup progress bar for unzipping operation
         with Progress(
             SpinnerColumn(),
             *Progress.get_default_columns(),
@@ -54,23 +84,24 @@ class MediaSorter:
         ) as progress:
             unzip_task = progress.add_task("[cyan]Unzipping files...", total=len(zip_files))
             
+            # Process each zip file
             for zip_path in zip_files:
                 try:
-                    # Extract in the same directory as the zip file
+                    # Create extraction directory next to zip file
                     extract_dir = zip_path.parent / zip_path.stem
-                    
                     self.console.print(f"[yellow]Unzipping: {zip_path} to {extract_dir}[/yellow]")
                     
-                    # Create extraction directory
+                    # Ensure extraction directory exists
                     extract_dir.mkdir(parents=True, exist_ok=True)
                     
-                    # Extract the zip file in place
+                    # Extract contents
                     with zipfile.ZipFile(zip_path, 'r') as zip_ref:
                         zip_ref.extractall(extract_dir)
                     
-                    # Delete the original zip file after successful extraction
+                    # Remove original zip file to save space
                     zip_path.unlink()
                     
+                    # Log successful operation
                     self.operations_log.append({
                         'timestamp': datetime.now().isoformat(),
                         'action': 'unzip',
@@ -80,6 +111,7 @@ class MediaSorter:
                     })
                     
                 except Exception as e:
+                    # Log failed operation
                     self.console.print(f"[red]Error unzipping {zip_path}: {e}[/red]")
                     self.operations_log.append({
                         'timestamp': datetime.now().isoformat(),
@@ -93,7 +125,15 @@ class MediaSorter:
         self.console.print("[green]Unzip phase complete![/green]")
 
     def calculate_total_size(self, path: Path) -> int:
-        """Calculate total size of non-media files."""
+        """
+        Calculate total size of all non-media files for progress tracking.
+        
+        Args:
+            path (Path): Directory to scan
+            
+        Returns:
+            int: Total size in bytes
+        """
         total = 0
         self.console.print("[yellow]Calculating total size...[/yellow]")
         for item in path.rglob('*'):
@@ -103,7 +143,12 @@ class MediaSorter:
         return total
 
     def dry_run(self) -> List[Dict]:
-        """Simulate the operation and return planned actions."""
+        """
+        Simulate the move operation without actually moving files.
+        
+        Returns:
+            List[Dict]: List of planned file movements
+        """
         planned_operations = []
         for item in self.source_dir.rglob('*'):
             if item.is_file() and not self.is_media_file(item):
