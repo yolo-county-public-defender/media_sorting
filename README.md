@@ -2,6 +2,15 @@
 
 A Python utility that helps organize files by separating media and non-media content. It handles unzipping of archives and moves non-media files to a backup location while preserving the original directory structure.
 
+## Quick Start
+
+```bash
+git clone <repository_url>
+cd media-sorter
+pip install rich
+python src/media_sorter.py
+```
+
 ## Features
 
 - Automatically extracts ZIP files in their original locations
@@ -16,6 +25,54 @@ A Python utility that helps organize files by separating media and non-media con
 - **Video**: mp4, avi, mov, mkv, wmv, flv
 - **Audio**: mp3, wav, flac, m4a, aac
 - **Images**: jpg, jpeg, png, gif, bmp, tiff
+
+## How It Works
+
+1. **Unzip Phase**
+
+   - Finds all ZIP files in source directory
+   - Extracts them in their original location
+   - Deletes original ZIP files to save space
+
+2. **Sorting Phase**
+   - Scans all files recursively
+   - Identifies media files by extension and MIME type
+   - Moves non-media files to backup location
+   - Preserves original folder structure
+
+## Example File Organization
+
+Before:
+
+```
+/Source
+├── Documents.zip
+├── vacation
+│   ├── info.txt
+│   ├── map.pdf
+│   └── beach.jpg
+└── work
+    ├── report.docx
+    └── presentation.mp4
+```
+
+After:
+
+```
+/Source
+├── vacation
+│   └── beach.jpg
+└── work
+    └── presentation.mp4
+
+/Source/NonMedia
+├── Documents/
+├── vacation
+│   ├── info.txt
+│   └── map.pdf
+└── work
+    └── report.docx
+```
 
 ## Installation
 
@@ -151,10 +208,6 @@ Check the operations log files in the backup directory for detailed error inform
 ## Contributing
 
 Feel free to submit issues, fork the repository, and create pull requests for any improvements.
-
-## License
-
-[Your License Here]
 
 ## Disclaimer
 

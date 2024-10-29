@@ -160,6 +160,69 @@ class MediaSorter:
                 })
         return planned_operations
 
+    def process_file(self, item: Path) -> bool:
+        """
+        Process a single file, moving it if it's a non-media file.
+        
+        Args:
+            item (Path): Path to the file to process
+            
+        Returns:
+            bool: True if processing was successful, False otherwise
+        """
+        try:
+            rel_path = item.relative_to(self.source_dir)
+            dest_path = self.backup_dir / rel_path
+            dest_path.parent.mkdir(parents=True, exist_ok=True)
+            
+            # Move the file instead of copy+delete
+            shutil.move(str(item), str(dest_path))
+            
+            # Log successful operation
+            self.log_operation('move', str(item), destination=str(dest_path))
+            return True
+            
+        except FileNotFoundError:
+            # Silently log FileNotFoundError without console output
+            self.log_operation('error', str(item), 
+                             error=f"[Errno 2] No such file or directory: '{item}'",
+                             silent=True)
+            return False
+            
+        except Exception as e:
+            # Print and log other types of errors
+            self.console.print(f"[red]Error processing file {item}: {e}[/red]")
+            self.log_operation('error', str(item), error=str(e))
+            return False
+
+    def log_operation(self, action: str, source: str, error: str = None, 
+                     destination: str = None, silent: bool = False) -> None:
+        """
+        Log an operation to the operations log.
+        
+        Args:
+            action (str): Type of action performed
+            source (str): Source file path
+            error (str, optional): Error message if applicable
+            destination (str, optional): Destination path for moves
+            silent (bool, optional): Whether to skip logging FileNotFoundError
+        """
+        log_entry = {
+            'timestamp': datetime.now().isoformat(),
+            'action': action,
+            'source': source
+        }
+        
+        if error:
+            log_entry['error'] = error
+        if destination:
+            log_entry['destination'] = destination
+            log_entry['status'] = 'success'
+        
+        # Only add to operations log if it's not a silenced FileNotFoundError
+        if not (silent and "No such file or directory" in str(error)):
+            self.operations_log.append(log_entry)
+
     def process_directory(self, dry_run: bool = False) -> None:
         """Main processing function."""
         try:
@@ -198,36 +261,15 @@ class MediaSorter:
 
                 for item in self.source_dir.rglob('*'):
                     if item.is_file() and not self.is_media_file(item):
-                        try:
-                            rel_path = item.relative_to(self.source_dir)
-                            dest_path = self.backup_dir / rel_path
-                            dest_path.parent.mkdir(parents=True, exist_ok=True)
-                            
-                            # Move the file instead of copy+delete
-                            shutil.move(str(item), str(dest_path))
-                            
-                            # Update progress
-                            file_size = item.stat().st_size
-                            processed_size += file_size
-                            progress.update(task, completed=processed_size)
-                            
-                            # Log the operation
-                            self.operations_log.append({
-                                'timestamp': datetime.now().isoformat(),
-                                'action': 'move',
-                                'source': str(item),
-                                'destination': str(dest_path),
-                                'status': 'success'
-                            })
-                            
-                        except Exception as e:
-                            self.operations_log.append({
-                                'timestamp': datetime.now().isoformat(),
-                                'action': 'error',
-                                'source': str(item),
-                                'error': str(e)
-                            })
-                            self.console.print(f"[red]Error processing file {item}: {e}[/red]")
+                        if self.process_file(item):
+                            # Update progress only for successful operations
+                            try:
+                                file_size = item.stat().st_size
+                                processed_size += file_size
+                                progress.update(task, completed=processed_size)
+                            except FileNotFoundError:
+                                # Ignore files that disappeared during processing
+                                pass
 
             # Save operations log
             log_file = self.backup_dir / 'operations_log.json'
