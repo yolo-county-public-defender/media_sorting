@@ -7,7 +7,7 @@ A Python utility that helps organize files by separating media and non-media con
 ```bash
 git clone <repository_url>
 cd media-sorter
-pip install rich
+pip install -r requirements.txt
 python src/media_sorter.py
 ```
 
