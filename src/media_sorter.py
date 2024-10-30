@@ -76,20 +76,30 @@ class MediaSorter:
             self.console.print("[green]No zip files found.[/green]")
             return
 
-        # Setup progress bar for unzipping operation
+        total_files = len(zip_files)
+        
+        # Setup single progress bar for all unzipping operations
         with Progress(
             SpinnerColumn(),
             *Progress.get_default_columns(),
             TimeElapsedColumn(),
         ) as progress:
-            unzip_task = progress.add_task("[cyan]Unzipping files...", total=len(zip_files))
+            unzip_task = progress.add_task(
+                f"[cyan]Unzipping {total_files} files...", 
+                total=total_files
+            )
             
             # Process each zip file
-            for zip_path in zip_files:
+            for index, zip_path in enumerate(zip_files, 1):
                 try:
+                    # Update description to show current file
+                    progress.update(
+                        unzip_task,
+                        description=f"[cyan]Unzipping ({index}/{total_files}): {zip_path.name}"
+                    )
+                    
                     # Create extraction directory next to zip file
                     extract_dir = zip_path.parent / zip_path.stem
-                    self.console.print(f"[yellow]Unzipping: {zip_path} to {extract_dir}[/yellow]")
                     
                     # Ensure extraction directory exists
                     extract_dir.mkdir(parents=True, exist_ok=True)
@@ -110,6 +120,9 @@ class MediaSorter:
                         'status': 'success'
                     })
                     
+                    # Update progress
+                    progress.advance(unzip_task)
+                    
                 except Exception as e:
                     # Log failed operation
                     self.console.print(f"[red]Error unzipping {zip_path}: {e}[/red]")
@@ -119,8 +132,9 @@ class MediaSorter:
                         'source': str(zip_path),
                         'error': str(e)
                     })
-                
-                progress.update(unzip_task, advance=1)
+                    
+                    # Still advance progress even on error
+                    progress.advance(unzip_task)
 
         self.console.print("[green]Unzip phase complete![/green]")
 
