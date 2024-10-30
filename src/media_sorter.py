@@ -3,7 +3,6 @@ import os
 import shutil
 import mimetypes
 import zipfile
-import tempfile
 from pathlib import Path
 from typing import Set, Dict, List
 from datetime import datetime
