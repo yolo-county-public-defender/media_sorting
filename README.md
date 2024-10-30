@@ -1,6 +1,6 @@
 # Media Sorter
 
-A Python utility that helps organize files by separating media and non-media content. It handles unzipping of archives and moves non-media files to a backup location while preserving the original directory structure.
+A Python utility that helps organize files by separating media and non-media content. It handles unzipping of archives and moves non-media files to a backup location while preserving the original directory structure. The backup directory is automatically created if it doesn't exist.
 
 ## Quick Start
 
@@ -28,13 +28,18 @@ python src/media_sorter.py
 
 ## How It Works
 
-1. **Unzip Phase**
+1. **Initialization**
+
+   - Creates a 'NonMedia' directory in the source location if it doesn't exist
+   - Sets up logging and progress tracking
+
+2. **Unzip Phase**
 
    - Finds all ZIP files in source directory
    - Extracts them in their original location
    - Deletes original ZIP files to save space
 
-2. **Sorting Phase**
+3. **Sorting Phase**
    - Scans all files recursively
    - Identifies media files by extension and MIME type
    - Moves non-media files to backup location
@@ -124,14 +129,15 @@ Note: Some packages like `os`, `shutil`, `mimetypes`, `zipfile`, `tempfile`, `da
 By default, the script is configured to:
 
 - Source Directory: `/Volumes/Extreme SSD`
-- Backup Directory: `/Volumes/Extreme SSD/NonMedia`
+- Backup Directory: `/Volumes/Extreme SSD/NonMedia` (automatically created if it doesn't exist)
 
 To change these locations, edit the following lines at the bottom of `media_sorter.py`:
 
 ```python
-source_directory = "/Volumnes/Extreme SSD" # Change this to your source directory
-backup_directory = "/Volumes/Extreme SSD/NonMedia" # Change this to your backup directory
+source_directory = "/Volumes/Extreme SSD" # Change this to your source directory
 ```
+
+The backup directory will automatically be created as a 'NonMedia' subdirectory within your source directory.
 
 ### Path Examples
 
@@ -139,14 +145,12 @@ backup_directory = "/Volumes/Extreme SSD/NonMedia" # Change this to your backup 
 
 ```python
 source_directory = "C:\\Users\\YourUsername\\Documents"
-backup_directory = "D:\\Backup\\NonMedia"
 ```
 
 #### macOS/Linux:
 
 ```python
 source_directory = "/Users/yourusername/Documents"
-backup_directory = "/Users/yourusername/Backup/NonMedia"
 ```
 
 ## Usage
@@ -161,11 +165,12 @@ python media_sorter.py
 
 The script will:
 
-1. Perform a dry run first, showing what files would be moved
-2. Ask for confirmation before proceeding
-3. Extract any ZIP files in their original locations
-4. Move non-media files to the backup directory
-5. Generate an operations log in the backup directory
+1. Create the NonMedia backup directory if it doesn't exist
+2. Perform a dry run first, showing what files would be moved
+3. Ask for confirmation before proceeding
+4. Extract any ZIP files in their original locations
+5. Move non-media files to the backup directory
+6. Generate an operations log in the backup directory
 
 ## Operation Logs
 
@@ -189,7 +194,8 @@ The script generates two types of logs in the backup directory:
 
 1. **Permission Errors**
 
-   - Ensure you have read/write permissions for both source and backup directories
+   - Ensure you have read/write permissions for the source directory
+   - The script needs permissions to create the backup directory if it doesn't exist
    - Try running with elevated privileges if necessary
 
 2. **Path Too Long** (Windows)
