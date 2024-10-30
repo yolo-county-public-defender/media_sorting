@@ -86,7 +86,7 @@ After:
 1. Clone this repository or download the script:
 
 ```bash
-git clone <repository_url>
+git clone https://github.com/yolo-county-public-defender/media_sorting.git
 ```
 
 2. Create and activate a virtual environment (recommended):
