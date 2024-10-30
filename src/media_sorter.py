@@ -35,7 +35,7 @@ class MediaSorter:
         # Define known media file extensions for quick lookup
         self.media_extensions: Set[str] = {
             # Video formats
-            '.mp4', '.avi', '.mov', '.mkv', '.wmv', '.flv',
+            '.mp4', '.avi', '.mov', '.mkv', '.wmv', '.flv', 
             # Audio formats
             '.mp3', '.wav', '.flac', '.m4a', '.aac',
             # Image formats
@@ -291,9 +291,12 @@ class MediaSorter:
 
 if __name__ == "__main__":
     try:
-        # Example usage
+        # Set up source directory
         source_directory = "/Volumes/Extreme SSD"
-        backup_directory = "/Volumes/Extreme SSD/NonMedia"
+        backup_directory = os.path.join(source_directory, "NonMedia")
+        
+        # Create NonMedia directory if it doesn't exist
+        os.makedirs(backup_directory, exist_ok=True)
         
         sorter = MediaSorter(source_directory, backup_directory)
         
