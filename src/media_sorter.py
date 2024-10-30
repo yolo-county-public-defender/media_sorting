@@ -243,6 +243,9 @@ class MediaSorter:
             # Create backup directory if it doesn't exist
             self.backup_dir.mkdir(parents=True, exist_ok=True)
 
+            # Get absolute path of NonMedia directory
+            nonmedia_abs_path = os.path.abspath(self.backup_dir)
+
             # First, handle all zip files
             if not dry_run:
                 self.unzip_directory()
@@ -274,6 +277,10 @@ class MediaSorter:
                 task = progress.add_task("[cyan]Processing...", total=total_size)
 
                 for item in self.source_dir.rglob('*'):
+                    # Skip the NonMedia directory and its contents
+                    if str(item).startswith(nonmedia_abs_path):
+                        continue
+                        
                     if item.is_file() and not self.is_media_file(item):
                         if self.process_file(item):
                             # Update progress only for successful operations
