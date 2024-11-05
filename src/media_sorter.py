@@ -44,6 +44,9 @@ class MediaSorter:
         # Zip files need special handling (extraction before processing)
         self.zip_extensions = {'.zip', '.ZIP'}
 
+        # Add new attribute to track person-level directories
+        self.person_dirs = {path for path in self.source_dir.iterdir() if path.is_dir()}
+
     def is_media_file(self, file_path: Path) -> bool:
         """
         Determine if a file is a media file based on extension and MIME type.
@@ -63,77 +66,84 @@ class MediaSorter:
 
     def unzip_directory(self) -> None:
         """
-        First processing phase: Extract all zip files in their original locations.
+        First processing phase: Extract all zip files recursively until no more are found.
         Deletes original zip files after successful extraction.
         """
         self.console.print("[yellow]Starting unzip phase...[/yellow]")
         
-        # Find all zip files recursively in source directory
-        zip_files = list(self.source_dir.rglob('*.zip')) + list(self.source_dir.rglob('*.ZIP'))
-        
-        if not zip_files:
-            self.console.print("[green]No zip files found.[/green]")
-            return
-
-        total_files = len(zip_files)
-        
-        # Setup single progress bar for all unzipping operations
-        with Progress(
-            SpinnerColumn(),
-            *Progress.get_default_columns(),
-            TimeElapsedColumn(),
-        ) as progress:
-            unzip_task = progress.add_task(
-                f"[cyan]Unzipping {total_files} files...", 
-                total=total_files
-            )
+        while True:
+            # Find all zip files recursively in source directory
+            zip_files = list(self.source_dir.rglob('*.zip')) + list(self.source_dir.rglob('*.ZIP'))
             
-            # Process each zip file
-            for index, zip_path in enumerate(zip_files, 1):
-                try:
-                    # Update description to show current file
-                    progress.update(
-                        unzip_task,
-                        description=f"[cyan]Unzipping ({index}/{total_files}): {zip_path.name}"
-                    )
-                    
-                    # Create extraction directory next to zip file
-                    extract_dir = zip_path.parent / zip_path.stem
-                    
-                    # Ensure extraction directory exists
-                    extract_dir.mkdir(parents=True, exist_ok=True)
-                    
-                    # Extract contents
-                    with zipfile.ZipFile(zip_path, 'r') as zip_ref:
-                        zip_ref.extractall(extract_dir)
-                    
-                    # Remove original zip file to save space
-                    zip_path.unlink()
-                    
-                    # Log successful operation
-                    self.operations_log.append({
-                        'timestamp': datetime.now().isoformat(),
-                        'action': 'unzip',
-                        'source': str(zip_path),
-                        'destination': str(extract_dir),
-                        'status': 'success'
-                    })
-                    
-                    # Update progress
-                    progress.advance(unzip_task)
-                    
-                except Exception as e:
-                    # Log failed operation
-                    self.console.print(f"[red]Error unzipping {zip_path}: {e}[/red]")
-                    self.operations_log.append({
-                        'timestamp': datetime.now().isoformat(),
-                        'action': 'unzip_error',
-                        'source': str(zip_path),
-                        'error': str(e)
-                    })
-                    
-                    # Still advance progress even on error
-                    progress.advance(unzip_task)
+            if not zip_files:
+                self.console.print("[green]No more zip files found.[/green]")
+                break
+
+            total_files = len(zip_files)
+            self.console.print(f"[yellow]Found {total_files} zip files to process...[/yellow]")
+            
+            # Setup progress bar for current batch of zip files
+            with Progress(
+                SpinnerColumn(),
+                *Progress.get_default_columns(),
+                TimeElapsedColumn(),
+            ) as progress:
+                unzip_task = progress.add_task(
+                    f"[cyan]Unzipping {total_files} files...", 
+                    total=total_files
+                )
+                
+                # Process each zip file
+                for index, zip_path in enumerate(zip_files, 1):
+                    try:
+                        # Skip if the zip file is in the backup directory
+                        if str(zip_path).startswith(str(self.backup_dir)):
+                            progress.advance(unzip_task)
+                            continue
+                        
+                        # Update description to show current file
+                        progress.update(
+                            unzip_task,
+                            description=f"[cyan]Unzipping ({index}/{total_files}): {zip_path.name}"
+                        )
+                        
+                        # Create extraction directory next to zip file
+                        extract_dir = zip_path.parent / zip_path.stem
+                        
+                        # Ensure extraction directory exists
+                        extract_dir.mkdir(parents=True, exist_ok=True)
+                        
+                        # Extract contents
+                        with zipfile.ZipFile(zip_path, 'r') as zip_ref:
+                            zip_ref.extractall(extract_dir)
+                        
+                        # Remove original zip file to save space
+                        zip_path.unlink()
+                        
+                        # Log successful operation
+                        self.operations_log.append({
+                            'timestamp': datetime.now().isoformat(),
+                            'action': 'unzip',
+                            'source': str(zip_path),
+                            'destination': str(extract_dir),
+                            'status': 'success'
+                        })
+                        
+                        # Update progress
+                        progress.advance(unzip_task)
+                        
+                    except Exception as e:
+                        # Log failed operation
+                        self.console.print(f"[red]Error unzipping {zip_path}: {e}[/red]")
+                        self.operations_log.append({
+                            'timestamp': datetime.now().isoformat(),
+                            'action': 'unzip_error',
+                            'source': str(zip_path),
+                            'error': str(e)
+                        })
+                        
+                        # Still advance progress even on error
+                        progress.advance(unzip_task)
 
         self.console.print("[green]Unzip phase complete![/green]")
 
@@ -236,6 +246,126 @@ class MediaSorter:
         if not (silent and "No such file or directory" in str(error)):
             self.operations_log.append(log_entry)
 
+    def flatten_media_files(self) -> None:
+        """
+        Flatten all media files into their respective person-level directories.
+        Move all non-media files to backup directory.
+        """
+        self.console.print("[yellow]Starting media file flattening...[/yellow]")
+        
+        with Progress(
+            SpinnerColumn(),
+            *Progress.get_default_columns(),
+            TimeElapsedColumn(),
+        ) as progress:
+            # First pass: Move all media files to person directory root
+            media_moves = []
+            nonmedia_moves = []
+            
+            self.console.print("[yellow]Scanning all files...[/yellow]")
+            
+            # Process each person directory
+            for person_dir in self.person_dirs:
+                # Recursively find ALL files first
+                all_files = list(person_dir.rglob('*'))
+                scan_task = progress.add_task(
+                    f"[cyan]Scanning {person_dir.name}...",
+                    total=len(all_files)
+                )
+                
+                for item in all_files:
+                    if item.is_file():
+                        if self.is_media_file(item):
+                            # Always move media files to person directory root
+                            new_path = person_dir / item.name
+                            # Handle duplicate filenames
+                            counter = 1
+                            while new_path.exists():
+                                stem = item.stem
+                                suffix = item.suffix
+                                new_path = person_dir / f"{stem}_{counter}{suffix}"
+                                counter += 1
+                            media_moves.append((item, new_path))
+                        else:
+                            # Move non-media files to backup directory
+                            rel_path = item.relative_to(self.source_dir)
+                            backup_path = self.backup_dir / rel_path
+                            nonmedia_moves.append((item, backup_path))
+                    progress.advance(scan_task)
+
+            # First move all media files to root
+            if media_moves:
+                self.console.print(f"[yellow]Moving {len(media_moves)} media files to root...[/yellow]")
+                media_task = progress.add_task(
+                    "[cyan]Moving media files...",
+                    total=len(media_moves)
+                )
+                
+                for old_path, new_path in media_moves:
+                    try:
+                        new_path.parent.mkdir(parents=True, exist_ok=True)
+                        shutil.move(str(old_path), str(new_path))
+                        self.log_operation('flatten_media', str(old_path), destination=str(new_path))
+                    except Exception as e:
+                        self.console.print(f"[red]Error moving media file {old_path}: {e}[/red]")
+                    progress.advance(media_task)
+
+            # Then move all non-media files
+            if nonmedia_moves:
+                self.console.print(f"[yellow]Moving {len(nonmedia_moves)} non-media files...[/yellow]")
+                nonmedia_task = progress.add_task(
+                    "[cyan]Moving non-media files...",
+                    total=len(nonmedia_moves)
+                )
+                
+                for old_path, new_path in nonmedia_moves:
+                    try:
+                        new_path.parent.mkdir(parents=True, exist_ok=True)
+                        shutil.move(str(old_path), str(new_path))
+                        self.log_operation('move_nonmedia', str(old_path), destination=str(new_path))
+                    except Exception as e:
+                        self.console.print(f"[red]Error moving non-media file {old_path}: {e}[/red]")
+                    progress.advance(nonmedia_task)
+
+            # Finally, clean up empty directories
+            self.console.print("[yellow]Cleaning up empty directories...[/yellow]")
+            
+            # Get all subdirectories in person directories
+            all_dirs = set()
+            for person_dir in self.person_dirs:
+                for dir_path in person_dir.rglob('*'):
+                    if dir_path.is_dir():
+                        all_dirs.add(dir_path)
+
+            # Sort directories by depth (deepest first)
+            sorted_dirs = sorted(all_dirs, 
+                               key=lambda x: len(str(x).split(os.sep)), 
+                               reverse=True)
+            
+            cleanup_task = progress.add_task(
+                "[cyan]Removing empty directories...",
+                total=len(sorted_dirs)
+            )
+            
+            for directory in sorted_dirs:
+                try:
+                    if directory not in self.person_dirs:  # Don't remove person-level directories
+                        # Check if directory contains any files (recursively)
+                        has_files = False
+                        for _, _, files in os.walk(directory):
+                            if files:
+                                has_files = True
+                                break
+                        
+                        if not has_files:
+                            shutil.rmtree(directory)
+                            self.log_operation('remove_directory', str(directory))
+                except Exception as e:
+                    self.console.print(f"[red]Error removing directory {directory}: {e}[/red]")
+                progress.advance(cleanup_task)
+
+        self.console.print("[green]Media file flattening complete![/green]")
+
     def process_directory(self, dry_run: bool = False) -> None:
         """Main processing function."""
         try:
@@ -248,6 +378,8 @@ class MediaSorter:
             # First, handle all zip files
             if not dry_run:
                 self.unzip_directory()
+                # Add flattening step after unzipping
+                self.flatten_media_files()
 
             # Then do a dry run and show planned operations
             planned_ops = self.dry_run()
